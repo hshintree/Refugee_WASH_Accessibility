@@ -251,7 +251,8 @@ def render(
     # ------------------------------------------------------------------
     # Render
     # ------------------------------------------------------------------
-    fig, ax = plt.subplots(figsize=(9.5, 8), dpi=dpi)
+    fig = plt.figure(figsize=(12.0, 8.0), dpi=dpi, facecolor=PALETTE["bg"])
+    ax = fig.add_axes([0.04, 0.08, 0.62, 0.84])
     ax.set_facecolor(PALETTE["bg"])
 
     cmap = LinearSegmentedColormap.from_list(
@@ -340,21 +341,24 @@ def render(
         fontsize=12, color=PALETTE["title"], loc="left", pad=12,
     )
 
-    cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+    # Colorbar in its own right-side axes (no overlap with plot or legend)
+    cbar_ax = fig.add_axes([0.71, 0.50, 0.020, 0.42])
+    cbar = fig.colorbar(im, cax=cbar_ax)
     cbar.set_label(cb_label, fontsize=9, color=PALETTE["muted"])
     cbar.ax.tick_params(labelsize=8, color=PALETTE["muted"])
-    # mark the Sphere target on the colorbar
-    cbar.ax.axhline(
-        SPHERE_TARGET, color=PALETTE["ink"], lw=1.2, linestyle="--",
-    )
+    cbar.ax.axhline(SPHERE_TARGET, color=PALETTE["ink"], lw=1.2, linestyle="--")
     cbar.ax.text(
-        1.6, SPHERE_TARGET, " Sphere\n target", transform=cbar.ax.get_yaxis_transform(),
+        1.5, SPHERE_TARGET, " Sphere\n target",
+        transform=cbar.ax.get_yaxis_transform(),
         va="center", fontsize=8, color=PALETTE["ink"],
     )
 
-    # legend
-    legend_x = bx1 - 320
-    legend_y = by1 - 30
+    # Right column for legend + stats, fully outside the heatmap
+    side_ax = fig.add_axes([0.76, 0.08, 0.22, 0.84])
+    side_ax.set_xlim(0, 1)
+    side_ax.set_ylim(0, 1)
+    side_ax.axis("off")
+
     legend_items = [
         (PALETTE["footpath"], "footpath / access road", "line"),
         (PALETTE["latrine"], f"existing latrine ({len(latr_in)})", "dot"),
@@ -362,35 +366,44 @@ def render(
         (PALETTE["shelter_edge"], "shelter outline", "line"),
         (PALETTE["boundary"], "camp boundary", "line2"),
     ]
-    y = legend_y
+    side_ax.text(0.0, 0.98, "Layers", fontsize=10,
+                 color=PALETTE["title"], fontweight="bold")
+    yi = 0.94
     for color, label, kind in legend_items:
         if kind == "line":
-            ax.plot([legend_x, legend_x + 24], [y - 9, y - 9], color=color, lw=1.1)
+            side_ax.plot([0.0, 0.10], [yi, yi], color=color, lw=1.1)
         elif kind == "line2":
-            ax.plot([legend_x, legend_x + 24], [y - 9, y - 9], color=color, lw=2.2)
+            side_ax.plot([0.0, 0.10], [yi, yi], color=color, lw=2.2)
         elif kind == "dot":
-            ax.scatter([legend_x + 12], [y - 9], s=12, c=color, alpha=0.8, linewidths=0)
+            side_ax.scatter([0.05], [yi], s=14, c=color, alpha=0.85, linewidths=0)
         elif kind == "square":
-            ax.scatter([legend_x + 12], [y - 9], s=22, marker="s", c=color,
-                       alpha=0.85, linewidths=0)
-        ax.text(legend_x + 32, y - 12, label, fontsize=9, color=PALETTE["muted"])
-        y -= 28
+            side_ax.scatter([0.05], [yi], s=24, marker="s", c=color,
+                            alpha=0.85, linewidths=0)
+        side_ax.text(0.14, yi, label, fontsize=9, color=PALETTE["muted"],
+                     va="center")
+        yi -= 0.035
 
-    # stats box
+    yi -= 0.04
+    side_ax.text(0.0, yi, "Numbers", fontsize=10,
+                 color=PALETTE["title"], fontweight="bold")
+    yi -= 0.04
     stats = [
-        f"{int(baseline.pop_total.sum()):,} people in camp ({pop_kind} used for R_j)",
+        f"{int(baseline.pop_total.sum()):,} people in camp",
+        f"({pop_kind} pop used for R_j)",
         f"{len(latr_b.xy_merc):,} latrines in supply set",
         f"{len(shelters):,} shelter footprints",
-        f"σ = {SIGMA:.0f} m, d₀ = {D0:.0f} m, Sphere = {SPHERE_TARGET:.3f}",
+        "",
+        f"σ = {SIGMA:.0f} m   d₀ = {D0:.0f} m",
+        f"Sphere target = {SPHERE_TARGET:.3f}",
+        "",
         f"mean A_i (populated fine): "
         f"{float(np.nanmean(A_masked[pop_grid > 0])):.4f}",
         f"share below Sphere: "
         f"{float(np.nanmean(A_masked[pop_grid > 0] < SPHERE_TARGET)):.1%}",
     ]
-    y = by0 + 100 + (len(stats) - 1) * 22
     for s in stats:
-        ax.text(bx0 + 22, y, s, fontsize=9, color=PALETTE["muted"])
-        y -= 22
+        side_ax.text(0.0, yi, s, fontsize=8.5, color=PALETTE["muted"], va="top")
+        yi -= 0.030
 
     # 200 m scale bar
     sx = bx0 + 40
