@@ -1,1 +1,12 @@
-.venv/
+# Data extracts (always re-derived from the committed zip files at root)
+Refugee_WASH_Accessibility-main/
+
+# Heavy intermediate caches
+src/cache/
+**/__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

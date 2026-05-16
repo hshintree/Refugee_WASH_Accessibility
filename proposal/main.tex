@@ -1,0 +1,61 @@
+\documentclass[twoside,11pt]{article}
+\usepackage{aa222-jmlr2e}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{cleveref}
+\setcitestyle{numbers,square,comma,sort&compress}
+\begin{document}
+\title{Gender-Aware Latrine Siting in Rohingya Refugee Camps}
+\newcommand{\shorttitle}{Rohingya Latrine Siting}
+
+\name{Hamdi Hamid}
+\email{hhamid@stanford.edu}
+\name{Kamal Eissa}
+\email{keissa@stanford.edu}
+\name{Rayan Ansari}
+\email{rayansri@stanford.edu}
+\name{Hakeem Shindy}
+\email{hshindy@stanford.edu}
+\maketitle
+
+\section{Problem}
+
+The Rohingya settlements in Cox's Bazar, Bangladesh hold more than 1.1 million displaced people in 33 camps covering about 24 km$^2$ \cite{arxiv}. This density makes Water, Sanitation, and Hygiene (WASH) access a public-health constraint. Poor access to latrines increases exposure to communicable disease, and unsafe shared facilities create an additional burden for women and girls \cite{arxiv}.
+
+Safe latrine siting is constrained in competing ways, as latrines should be close enough to reach, but not placed where they increase groundwater, shelter, food, or safety risks. Sphere standards emphasize short walking distances and minimum service ratios, while humanitarian WASH guidance also requires privacy, cultural acceptability, and protection from gender-based violence \cite{Sphere_Association2018-uu,United_Nations_High_Commissioner_for_Refugees2026-jk}. Choosing new locations one site at a time does not directly optimize these tradeoffs at camp scale.
+
+Ahn et al.'s recent work maps shelters from sub-meter imagery, estimates population on a 50\,m grid, and computes WASH accessibility over the camp footpath network using an enhanced two-step floating catchment area method \cite{arxiv}. Their results show that average WASH accessibility fell from 0.040 in 2022 to 0.034 in 2025, while female accessibility under a safety-penalty scenario was about 27\% lower than male accessibility.
+
+We propose an optimization problem focused on deciding where to add $K$ latrines. We plan to use Ahn et al.'s public accessibility pipeline for evaluation and the ISCG common-facility map as a constraint layer for sensitive sites such as schools, health posts, safe spaces, food distribution points, and solid-waste pits \cite{coxbazar-dataset}. Our goal is to find latrine locations that improve overall access while reducing the female access gap. This is a discrete facility-location problem with a multiobjective tradeoff between efficiency and equity \cite{Toregas1971-uy,Church1974-sz,Farahani2012-sq}.
+
+\section{Proposed Approach}
+
+We discretize each camp into 50\,m candidate cells. A cell is eligible if it lies inside the camp buffer and does not intersect a shelter, water body, existing latrine setback, or exclusion zone around sensitive facilities. For each candidate $j$, the binary variable $x_j=1$ means a new latrine is built there. We first focus on Camp 22A and then repeat the same pipeline on the five camps with the largest accessibility declines in Ahn et al.
+
+For each demand cell $i$ and candidate site $j$, we precompute the marginal accessibility gain $\Delta a_{ij}$ using the same network distances, Gaussian decay, and 1609\,m catchment used by Ahn et al.\ \cite{arxiv}. We approximate post-intervention accessibility as
+\begin{equation}
+A_i(x) \;\approx\; A_i^{(0)} + \sum_{j \in \mathcal{C}} \Delta a_{ij}\, x_j,
+\end{equation}
+where $A_i^{(0)}$ is the published 2022 Scenario 2 baseline. This linear approximation lets us solve an integer program quickly and then re-score the selected sites with the full nonlinear E2SFCA evaluator.
+
+The primary optimization problem is
+\begin{equation}
+\max_x \quad
+\lambda \sum_i p_i A_i^{(t)}(x)
++ (1-\lambda)\sum_{i \in \mathcal{L}} p_i^{(f)} A_i^{(f)}(x)
+\quad
+\text{s.t.}\quad
+\sum_j x_j \le K,\quad x_j \in \{0,1\}.
+\end{equation}
+Here $p_i$ is total population, $p_i^{(f)}$ is female population, and $\mathcal{L}$ is the set of cells in the bottom decile of female latrine accessibility at baseline. Sweeping $\lambda$ traces the efficiency-equity frontier \cite{Kochenderfer2019-iw}.
+
+We compare three policies. The baseline is a greedy policy that repeatedly selects the candidate with the largest marginal gain. The main method solves the integer program with branch-and-bound. For a robustness check, we propose using a binary genetic algorithm that evaluates each proposed solution with the full E2SFCA calculation instead of the linear approximation.
+
+We evaluate each policy against the 2022 Scenario 2 baseline. The main outcomes are population-weighted mean latrine accessibility, mean accessibility in the baseline bottom female decile, 10th percentile female accessibility after intervention, and the share of female population below the Sphere service target. We also report runtime, optimality gap, and the difference between the linearized score and the recomputed E2SFCA score.
+
+
+\bibliographystyle{IEEEtranN}
+\bibliography{references}
+\end{document}
