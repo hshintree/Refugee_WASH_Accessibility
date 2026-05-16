@@ -29,8 +29,10 @@ from matplotlib.patches import Polygon as MplPolygon
 from geo import points_in_poly
 from loaders import (
     PROJECT_ROOT,
+    filter_baseline_to_camp,
     filter_points_to_camp,
     filter_shelters_to_camp,
+    load_accessibility,
     load_camp_polygon,
     load_common_facilities,
     load_footpath_polylines,
@@ -73,8 +75,64 @@ def _filter_polylines_to_bbox(
     return kept
 
 
-def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
-    print(f"Loading {camp_name} layers...")
+def fine_pop_density(
+    camp,
+    shelters: list[dict],
+    total_pop: float,
+    cell_size_m: float = 10.0,
+    smooth_sigma: float = 1.2,
+):
+    """Allocate `total_pop` to a fine grid by shelter-area-weighted shares.
+
+    Each shelter's `area` (m²) is binned by its centroid into a fine cell;
+    every cell's population = total_pop × (shelter_area_in_cell / total_shelter_area).
+    A light Gaussian blur softens the result for cleaner visualization.
+
+    Returns (density_2d, x_min, y_min, x_max, y_max) where density is
+    people-per-cell at the chosen `cell_size_m`.
+    """
+    bx0 = float(camp.merc[:, 0].min())
+    by0 = float(camp.merc[:, 1].min())
+    bx1 = float(camp.merc[:, 0].max())
+    by1 = float(camp.merc[:, 1].max())
+
+    nx = max(1, int(np.ceil((bx1 - bx0) / cell_size_m)))
+    ny = max(1, int(np.ceil((by1 - by0) / cell_size_m)))
+    grid = np.zeros((ny, nx), dtype=float)
+
+    total_area = 0.0
+    for sh in shelters:
+        outer = sh["rings"][0]
+        rx = [p[0] for p in outer]
+        ry = [p[1] for p in outer]
+        cx = sum(rx) / len(rx)
+        cy = sum(ry) / len(ry)
+        a = float(sh.get("area") or 0.0)
+        if a <= 0:
+            continue
+        ix = int((cx - bx0) / cell_size_m)
+        iy = int((cy - by0) / cell_size_m)
+        if 0 <= ix < nx and 0 <= iy < ny:
+            grid[iy, ix] += a
+            total_area += a
+
+    if total_area > 0:
+        grid *= (total_pop / total_area)
+
+    if smooth_sigma > 0:
+        try:
+            from scipy.ndimage import gaussian_filter
+
+            grid = gaussian_filter(grid, sigma=smooth_sigma)
+        except ImportError:
+            pass
+
+    return grid, bx0, by0, bx1, by1
+
+
+def render(camp_name: str, out_path: Path, *, dpi: int = 200,
+           overlay: str = "shelter", fine_cellsize: float = 10.0) -> None:
+    print(f"Loading {camp_name} layers (overlay={overlay})...")
     camp = load_camp_polygon(camp_name)
     cf = load_common_facilities(camp_name)
     latr = load_latrines_2022()
@@ -82,9 +140,31 @@ def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
     sensitive = cf.sensitive_xy()
     if len(sensitive):
         sensitive = filter_points_to_camp(sensitive, camp)
-    shelters_all = load_shelter_polygons(2022)
-    shelters = filter_shelters_to_camp(shelters_all, camp)
-    print(f"  shelters in camp: {len(shelters)}")
+    shelters: list[dict] = []
+    baseline = None
+    fine_density = None
+    show_shelter_overlay = overlay in ("shelter", "fine_pop_density", "fine_pop_female")
+    if show_shelter_overlay:
+        shelters_all = load_shelter_polygons(2022)
+        shelters = filter_shelters_to_camp(shelters_all, camp)
+        print(f"  shelters in camp: {len(shelters)}")
+    if overlay in ("pop_total", "pop_female", "pop_density",
+                   "fine_pop_density", "fine_pop_female"):
+        base_full = load_accessibility("ACC22_S2.gpkg")
+        baseline = filter_baseline_to_camp(base_full, camp)
+        print(f"  demand cells: {len(baseline.cell_x)}, "
+              f"sum total pop: {baseline.pop_total.sum():.0f}, "
+              f"sum female pop: {baseline.pop_female.sum():.0f}")
+    if overlay in ("fine_pop_density", "fine_pop_female"):
+        total_pop = (
+            float(baseline.pop_female.sum())
+            if overlay == "fine_pop_female"
+            else float(baseline.pop_total.sum())
+        )
+        fine_density = fine_pop_density(
+            camp, shelters, total_pop, cell_size_m=fine_cellsize, smooth_sigma=1.2
+        )
+        print(f"  fine grid: {fine_density[0].shape} at {fine_cellsize:.0f} m")
     footpaths = load_footpath_polylines()
     bx0 = camp.merc[:, 0].min() - 150
     by0 = camp.merc[:, 1].min() - 150
@@ -97,17 +177,100 @@ def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
     fig, ax = plt.subplots(figsize=(9.5, 8), dpi=dpi)
     ax.set_facecolor(PALETTE["bg"])
 
-    # Shelters: a soft fill to suggest density without dominating
+    overlay_pc = None
+    overlay_label = ""
+    overlay_image = None  # imshow handle for fine grid
+
+    # Fine-grid population density: drawn FIRST so shelter footprints and
+    # everything else sit on top.
+    if fine_density is not None:
+        from matplotlib.colors import LinearSegmentedColormap
+
+        grid, gx0, gy0, gx1, gy1 = fine_density
+        # mask cells outside camp polygon for cleaner edges
+        ny, nx = grid.shape
+        cs = (gx1 - gx0) / nx
+        ix = np.arange(nx)
+        iy = np.arange(ny)
+        Cx = gx0 + (ix + 0.5) * cs
+        Cy = gy0 + (iy + 0.5) * cs
+        XX, YY = np.meshgrid(Cx, Cy)
+        in_poly = points_in_poly(XX.ravel(), YY.ravel(), camp.merc_list()).reshape(grid.shape)
+        masked = np.where(in_poly, grid, np.nan)
+
+        cmap = LinearSegmentedColormap.from_list(
+            "pop_fine", ["#f6efe2", "#dc9a6a", "#a33d3d"]
+        )
+        cmap.set_bad(color=PALETTE["bg"])
+        overlay_image = ax.imshow(
+            masked,
+            extent=(gx0, gx1, gy0, gy1),
+            origin="lower",
+            cmap=cmap,
+            alpha=0.95,
+            interpolation="bilinear",
+            zorder=1,
+        )
+        nz = grid[in_poly & (grid > 0)]
+        if len(nz):
+            overlay_image.set_clim(0, float(np.quantile(nz, 0.97)))
+        overlay_label = (
+            f"Female population per {fine_cellsize:.0f} m cell (2022)"
+            if overlay == "fine_pop_female"
+            else f"Population per {fine_cellsize:.0f} m cell (2022)"
+        )
+
+    # Shelter polygons: dim outlines when the fine heatmap is below them,
+    # filled patches otherwise.
     if shelters:
         patches = [MplPolygon(sh["rings"][0]) for sh in shelters]
-        pc = PatchCollection(
-            patches,
-            facecolor=PALETTE["shelter_fill"],
-            edgecolor=PALETTE["shelter_edge"],
-            alpha=0.55,
-            linewidths=0.25,
-        )
+        if fine_density is not None:
+            pc = PatchCollection(
+                patches,
+                facecolor="none",
+                edgecolor=PALETTE["shelter_edge"],
+                alpha=0.35,
+                linewidths=0.4,
+                zorder=2,
+            )
+        else:
+            pc = PatchCollection(
+                patches,
+                facecolor=PALETTE["shelter_fill"],
+                edgecolor=PALETTE["shelter_edge"],
+                alpha=0.55,
+                linewidths=0.25,
+                zorder=2,
+            )
         ax.add_collection(pc)
+    if baseline is not None and overlay in ("pop_total", "pop_female", "pop_density"):
+        from matplotlib.colors import LinearSegmentedColormap
+
+        if overlay == "pop_total":
+            vals = baseline.pop_total
+            overlay_label = "Total population per 50 m cell (2022)"
+        elif overlay == "pop_female":
+            vals = baseline.pop_female
+            overlay_label = "Female population per 50 m cell (2022)"
+        elif overlay == "pop_density":
+            # per-hectare density (50 m cell = 0.25 ha)
+            vals = baseline.pop_total / 0.25
+            overlay_label = "Population density (people / ha, 2022)"
+        cmap = LinearSegmentedColormap.from_list(
+            "pop", ["#f6efe2", "#dc9a6a", "#a33d3d"]
+        )
+        patches = [MplPolygon(r) for r in baseline.rings]
+        overlay_pc = PatchCollection(
+            patches,
+            array=np.asarray(vals, dtype=float),
+            cmap=cmap,
+            edgecolors="none",
+            alpha=0.92,
+        )
+        nz = vals[vals > 0]
+        if len(nz):
+            overlay_pc.set_clim(0, float(np.quantile(nz, 0.97)))
+        ax.add_collection(overlay_pc)
 
     # Footpaths
     if footpaths_in:
@@ -160,19 +323,33 @@ def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
         s.set_color(PALETTE["muted"])
         s.set_linewidth(0.6)
 
+    title_suffix = "" if overlay == "shelter" else f" — {overlay_label}"
     ax.set_title(
-        f"{camp_name}: optimizer context layers (2022)",
-        fontsize=13,
+        f"{camp_name}: optimizer context layers (2022){title_suffix}",
+        fontsize=12,
         color=PALETTE["title"],
         loc="left",
         pad=12,
     )
 
+    if overlay_pc is not None:
+        cbar = fig.colorbar(overlay_pc, ax=ax, fraction=0.04, pad=0.02)
+        cbar.set_label(overlay_label, fontsize=9, color=PALETTE["muted"])
+        cbar.ax.tick_params(labelsize=8, color=PALETTE["muted"])
+    elif overlay_image is not None:
+        cbar = fig.colorbar(overlay_image, ax=ax, fraction=0.04, pad=0.02)
+        cbar.set_label(overlay_label, fontsize=9, color=PALETTE["muted"])
+        cbar.ax.tick_params(labelsize=8, color=PALETTE["muted"])
+
     # Legend
     legend_x = bx1 - 320
     legend_y = by1 - 30
-    legend_items = [
-        (PALETTE["shelter_fill"], "shelter footprint", "patch"),
+    legend_items = []
+    if shelters:
+        legend_items.append(
+            (PALETTE["shelter_fill"], "shelter footprint", "patch")
+        )
+    legend_items += [
         (PALETTE["footpath"], "footpath / access road", "line"),
         (PALETTE["latrine"], f"existing latrine ({len(latr_in)})", "dot"),
         (PALETTE["sensitive"], f"sensitive facility ({len(sensitive)})", "square"),
@@ -206,9 +383,17 @@ def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
         y -= 28
 
     # Stats box (lower-right)
-    stats = [
-        f"{len(shelters):,} shelter footprints",
-        f"{sum((sh.get('area') or 0) for sh in shelters):.0f} m² shelter area",
+    stats: list[str] = []
+    if shelters:
+        stats.append(f"{len(shelters):,} shelter footprints")
+        stats.append(
+            f"{sum((sh.get('area') or 0) for sh in shelters):.0f} m² shelter area"
+        )
+    if baseline is not None:
+        stats.append(f"{baseline.pop_total.sum():,.0f} total people (2022)")
+        stats.append(f"{baseline.pop_female.sum():,.0f} female (2022)")
+        stats.append(f"{(baseline.pop_total>0).sum()} / {len(baseline.cell_x)} cells populated")
+    stats += [
         f"{len(latr_in):,} latrines",
         f"{len(footpaths_in):,} footpath segments",
         f"{len(sensitive):,} sensitive sites",
@@ -245,15 +430,31 @@ def render(camp_name: str, out_path: Path, *, dpi: int = 200) -> None:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--camp", default="Camp 22")
+    p.add_argument(
+        "--overlay",
+        default="shelter",
+        choices=(
+            "shelter",
+            "pop_total",
+            "pop_female",
+            "pop_density",
+            "fine_pop_density",
+            "fine_pop_female",
+        ),
+        help="background fill for the map",
+    )
+    p.add_argument("--fine-cellsize", type=float, default=10.0,
+                   help="cell size in meters for fine_pop_* overlays")
     p.add_argument("--out", default=None,
-                   help="output PNG path; default = results/<slug>/figures/layered_map.png")
+                   help="output PNG path; default depends on overlay")
     args = p.parse_args()
     if args.out:
         out = Path(args.out)
     else:
         slug = args.camp.lower().replace(" ", "")
-        out = PROJECT_ROOT / "results" / slug / "figures" / "layered_map.png"
-    render(args.camp, out)
+        stem = "layered_map" if args.overlay == "shelter" else f"layered_map_{args.overlay}"
+        out = PROJECT_ROOT / "results" / slug / "figures" / f"{stem}.png"
+    render(args.camp, out, overlay=args.overlay, fine_cellsize=args.fine_cellsize)
 
 
 if __name__ == "__main__":
