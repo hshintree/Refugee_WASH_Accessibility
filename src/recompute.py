@@ -40,6 +40,7 @@ def recompute_with_new_sites(
     new_capacity_f: float = 0.5,
     d0: float = D0,
     sigma: float = SIGMA,
+    distance_fn=None,
 ) -> RecomputeResult:
     """Run E2SFCA before and after appending `new_xy` to the supply set.
 
@@ -47,13 +48,17 @@ def recompute_with_new_sites(
     site; `new_capacity_f` is the female-effective count (e.g. 0.5 if a
     block of 2 stances is split 1 male / 1 female, or for the Scenario 2
     safety penalty applied to all-gender stances).
+
+    `distance_fn(orig_xy, dest_xy) -> ndarray` overrides the default
+    Euclidean metric so the recompute can use network distance.
     """
-    D_old = euclidean_distance_matrix(dem_xy, sup_xy)
+    distance_fn = distance_fn or euclidean_distance_matrix
+    D_old = distance_fn(dem_xy, sup_xy)
     A_before_t = e2sfca(pop, sup_capacity_t, D_old, d0=d0, sigma=sigma)
     A_before_f = e2sfca(pop_f, sup_capacity_f, D_old, d0=d0, sigma=sigma)
 
     if len(new_xy):
-        D_new = euclidean_distance_matrix(dem_xy, new_xy)
+        D_new = distance_fn(dem_xy, new_xy)
         D_all = np.concatenate([D_old, D_new], axis=1)
         n_t_new = np.full(len(new_xy), new_capacity_t)
         n_f_new = np.full(len(new_xy), new_capacity_f)

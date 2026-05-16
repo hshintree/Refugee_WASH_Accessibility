@@ -155,6 +155,73 @@ def load_footpath_polylines() -> list[list[tuple[float, float]]]:
     return out
 
 
+# --- Shelter footprints (SAM-style CV segmentation output) ----------------
+
+SHELTER_ZIP = ACCESS / "data" / "result" / "Rohingya_z18_45441_year2022_2025v7.zip"
+
+
+def _extracted_path(zip_path: Path, member: str) -> Path:
+    """Extract `member` from `zip_path` into a sibling cache dir if missing."""
+    import zipfile
+
+    cache = PROJECT_ROOT / "src" / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    out_path = cache / member
+    if not out_path.exists():
+        with zipfile.ZipFile(zip_path) as zf:
+            with zf.open(member) as src, open(out_path, "wb") as dst:
+                while chunk := src.read(1 << 20):
+                    dst.write(chunk)
+    return out_path
+
+
+def load_shelter_polygons(year: int = 2022) -> list[dict]:
+    """Return shelter footprint polygons reprojected to Web Mercator.
+
+    Each entry: {"rings": [[(x,y), ...]], "area": float_or_None}. Coords are
+    EPSG:3857 meters (lat/lon → Web Mercator reprojection applied on load).
+    The source GPKG stores rings in lon/lat degrees despite its SRS metadata.
+    """
+    from io_gpkg import read_features
+
+    member = {
+        2022: "Rohingya_z18_45441_year2022_v7.gpkg",
+        2025: "Rohingya_z18_00000_year2025_v7.gpkg",
+    }[year]
+    gpkg = _extracted_path(SHELTER_ZIP, member)
+
+    out: list[dict] = []
+    for f in read_features(gpkg):
+        if not f.rings:
+            continue
+        new_rings = []
+        for ring in f.rings:
+            lons = np.array([p[0] for p in ring], dtype=float)
+            lats = np.array([p[1] for p in ring], dtype=float)
+            mx, my = lonlat_to_merc(lons, lats)
+            new_rings.append(list(zip(mx.tolist(), my.tolist())))
+        out.append({"rings": new_rings, "area": f.attrs.get("area")})
+    return out
+
+
+def filter_shelters_to_camp(
+    shelters: list[dict], camp: CampPolygon
+) -> list[dict]:
+    from geo import point_in_poly
+
+    poly = camp.merc_list()
+    out: list[dict] = []
+    for sh in shelters:
+        outer = sh["rings"][0]
+        rx = [p[0] for p in outer]
+        ry = [p[1] for p in outer]
+        cx = (min(rx) + max(rx)) / 2
+        cy = (min(ry) + max(ry)) / 2
+        if point_in_poly(cx, cy, poly):
+            out.append(sh)
+    return out
+
+
 # --- Population ------------------------------------------------------------
 
 

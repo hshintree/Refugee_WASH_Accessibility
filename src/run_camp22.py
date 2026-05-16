@@ -36,8 +36,10 @@ from loaders import (
     load_accessibility,
     load_camp_polygon,
     load_common_facilities,
+    load_footpath_polylines,
 )
-from load_latrines import load_latrines_2022
+from load_latrines import load_latrines_2022, filter_latrines_to_bbox
+from network_distance import build_graph, network_distance_matrix
 from recompute import metrics_table, recompute_with_new_sites
 
 
@@ -78,19 +80,47 @@ def run(args) -> dict:
     if len(cands.xy) == 0:
         raise SystemExit("No feasible candidates — relax exclusion buffers.")
 
-    print("\n== Computing marginal gains (Euclidean E2SFCA) ==")
+    dem_xy = np.column_stack([baseline.cell_x, baseline.cell_y])
+
+    D_dem_cand = None
+    fg = None
+    distance_fn = None
+    if args.distance == "network":
+        print("\n== Building footpath network graph ==")
+        t = time.time()
+        bx0 = camp.merc[:, 0].min() - 2000
+        by0 = camp.merc[:, 1].min() - 2000
+        bx1 = camp.merc[:, 0].max() + 2000
+        by1 = camp.merc[:, 1].max() + 2000
+        all_paths = load_footpath_polylines()
+        paths_local = [
+            p for p in all_paths
+            if any(bx0 <= x <= bx1 and by0 <= y <= by1 for x, y in p)
+        ]
+        fg = build_graph(paths_local, snap_tol_m=0.5)
+        print(f"  graph: {len(fg.nodes_xy)} nodes, {fg.graph.nnz//2} edges, "
+              f"{fg.n_components} components ({time.time()-t:.2f}s)")
+        D_dem_cand = network_distance_matrix(dem_xy, cands.xy, fg, d0=1609.0)
+
+        def distance_fn(orig_xy: np.ndarray, dest_xy: np.ndarray) -> np.ndarray:
+            return network_distance_matrix(orig_xy, dest_xy, fg, d0=1609.0)
+
+    label = "network" if args.distance == "network" else "Euclidean"
+    print(f"\n== Computing marginal gains ({label} E2SFCA) ==")
     t = time.time()
     mg_t = marginal.compute(
-        dem_xy=np.column_stack([baseline.cell_x, baseline.cell_y]),
+        dem_xy=dem_xy,
         pop=baseline.pop_total,
         cand_xy=cands.xy,
         capacity=1.0,
+        distance_matrix=D_dem_cand,
     )
     mg_f = marginal.compute(
-        dem_xy=np.column_stack([baseline.cell_x, baseline.cell_y]),
+        dem_xy=dem_xy,
         pop=baseline.pop_female,
         cand_xy=cands.xy,
-        capacity=0.5,  # half of a default 1-stance block effectively female
+        capacity=0.5,
+        distance_matrix=D_dem_cand,
     )
     print(f"  done in {time.time()-t:.2f}s; "
           f"delta_t shape={mg_t.delta.shape}, mean per-cand gain="
@@ -130,8 +160,6 @@ def run(args) -> dict:
     sup_t = all_latr.LT[c22_mask]
     sup_f = all_latr.LT_female_S2[c22_mask]  # use Scenario 2 capacities
 
-    dem_xy = np.column_stack([baseline.cell_x, baseline.cell_y])
-
     for lam in lambdas:
         print(f"\n  lambda={lam:.2f}")
         # Greedy
@@ -161,6 +189,7 @@ def run(args) -> dict:
                 sup_capacity_t=sup_t,
                 sup_capacity_f=sup_f,
                 new_xy=new_xy,
+                distance_fn=distance_fn,
             )
             mt = metrics_table(
                 rc.A_before_t, rc.A_after_t, rc.A_before_f, rc.A_after_f,
@@ -227,6 +256,12 @@ def parse_args():
     p.add_argument("--bottom-quantile", type=float, default=0.10)
     p.add_argument("--demand-grid-only", action="store_true")
     p.add_argument("--ip-time-limit", type=float, default=60.0)
+    p.add_argument(
+        "--distance",
+        choices=("euclid", "network"),
+        default="euclid",
+        help="distance metric for E2SFCA: Euclidean (fast) or network (matches Ahn et al.)",
+    )
     return p.parse_args()
 
 

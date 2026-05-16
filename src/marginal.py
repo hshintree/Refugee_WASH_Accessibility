@@ -70,6 +70,7 @@ def compute(
     capacity: float = 1.0,
     d0: float = D0,
     sigma: float = SIGMA,
+    distance_matrix: np.ndarray | None = None,
 ) -> MarginalGains:
     """Compute Δa_ij for every (i,j).
 
@@ -78,8 +79,16 @@ def compute(
         pop: (M,) demand population (used for the supply ratio denom).
         cand_xy: (N, 2) candidate facility positions.
         capacity: per-candidate facility capacity (default 1 stance).
+        distance_matrix: optional pre-computed (M, N) distance matrix. When
+            `None`, falls back to Euclidean in the coordinate system of
+            `dem_xy`/`cand_xy`. Pass a network-distance matrix from
+            `network_distance.network_distance_matrix` to match Ahn et al.
     """
-    D = euclid_distance(dem_xy, cand_xy)
+    D = distance_matrix if distance_matrix is not None else euclid_distance(dem_xy, cand_xy)
+    if D.shape != (len(dem_xy), len(cand_xy)):
+        raise ValueError(
+            f"distance_matrix shape {D.shape} ≠ ({len(dem_xy)}, {len(cand_xy)})"
+        )
     K = kernel_matrix(D, d0=d0, sigma=sigma)
     denom = (K * pop[:, None]).sum(axis=0)
     with np.errstate(divide="ignore", invalid="ignore"):

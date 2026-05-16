@@ -87,21 +87,38 @@ the wrong demonstrator.
 
 ## Camp 09 pilot (severely under-served baseline)
 
-Camp 09 has the worst baseline access of the 33 camps: 96 % of female
-population sit below the Sphere service target.
+Camp 09 has the worst baseline access of the 33 camps. With Euclidean
+distance ~96 % of women sit below the Sphere service target; with proper
+network distance the baseline is rosier (~83 %) because the footpath
+graph models reachable cells more realistically.
 
-| Metric | Baseline (2022) | After K=20 IP (λ=0.5) | Δ |
+**Network distance, K=20, full λ sweep:**
+
+| λ | After share below Sphere | After P10 female | After mean LT_f |
 |---|---|---|---|
-| Pop-weighted mean LT_t | 0.0281 | 0.0287 | +2.1 % |
-| Pop-weighted mean LT_f | 0.0393 | 0.0399 | +1.4 % |
-| P10 female LT_f | 0.0196 | 0.0216 | +10 % |
-| Share female below Sphere | 95.8 % | 93.4 % | −2.4 pp |
+| baseline | 82.6 % | 0.00476 | 0.03932 |
+| 0.00 (pure equity) | 81.2 % | 0.01873 (4×) | 0.03989 |
+| 0.50 | 81.6 % | 0.01649 | 0.03989 |
+| 1.00 (pure efficiency) | 82.3 % | 0.01242 (2.6×) | 0.03989 |
 
-The chosen sites cluster in the under-served eastern half of the camp (see
+This is the real Pareto trade-off: at λ=0 the optimizer lifts the
+worst-off (P10 female jumps 4×), at λ=1 it spreads gains across more
+under-served cells but doesn't lift the bottom as hard. Pop-weighted
+mean accessibility is identical across λ — that's the E2SFCA
+conservation property (see below).
+
+**Euclidean distance, same K and λ sweep** (for comparison):
+
+| Metric | Baseline | After K=20 IP (λ=0.5) |
+|---|---|---|
+| Share female below Sphere | 95.8 % | 93.4 % |
+| P10 female LT_f | 0.0196 | 0.0216 |
+
+Chosen sites cluster in the under-served eastern half of the camp (see
 `results/camp09/figures/chosen_sites.png` and `delta_LT_t.png`). The
 greedy and IP selections still overlap because the linear objective is
 separable across candidates; the IP starts to differ from greedy only
-when the pairwise-spacing or per-region budget constraints bind.
+when pairwise-spacing or per-region budget constraints bind.
 
 ## Why greedy and IP coincide for these runs
 
