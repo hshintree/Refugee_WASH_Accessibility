@@ -89,6 +89,26 @@ From the R project root:
 Rscript ./main.R
 ```
 
+### Python port (igraph + NumPy)
+
+**Conda** (from repo root):
+
+``` bash
+conda env create -f Accessibility/python/environment.yml
+conda activate wash-access
+PYTHONPATH=Accessibility/python python -m wash_access
+```
+
+**venv + pip**:
+
+``` bash
+python -m venv .venv && .venv/bin/pip install -r Accessibility/python/requirements.txt
+PYTHONPATH=Accessibility/python .venv/bin/python -m wash_access
+```
+
+- Full run (road network OD matrices) is memory- and CPU-intensive; use `--no-road-network` for a faster pass that only writes the Euclidean GPKGs.
+- Outputs go to `./out/` by default (same as the R workflow).
+
 ## Outputs
 
 Written to `./out/`:

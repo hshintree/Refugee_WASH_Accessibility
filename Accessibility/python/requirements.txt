@@ -1,0 +1,10 @@
+# Python accessibility pipeline (see Accessibility/python/wash_access/README.md in parent docs)
+geopandas>=1.0,<2
+numpy>=1.24
+pandas>=2
+pyogrio>=0.7
+rasterio>=1.3
+scipy>=1.11
+shapely>=2
+matplotlib>=3.7
+python-igraph>=0.11
