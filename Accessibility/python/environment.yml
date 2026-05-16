@@ -1,0 +1,26 @@
+# Conda environment for the WASH accessibility Python pipeline.
+#
+# Create (from repo root):
+#   conda env create -f Accessibility/python/environment.yml
+#
+# Update after editing this file:
+#   conda env update -f Accessibility/python/environment.yml --prune
+#
+# Activate:
+#   conda activate wash-access
+#
+name: wash-access
+channels:
+  - conda-forge
+channel_priority: strict
+dependencies:
+  - python>=3.10,<3.13
+  - geopandas>=1.0,<2
+  - numpy>=1.24
+  - pandas>=2
+  - pyogrio>=0.7
+  - rasterio>=1.3
+  - scipy>=1.11
+  - shapely>=2
+  - matplotlib>=3.7
+  - python-igraph>=0.11
