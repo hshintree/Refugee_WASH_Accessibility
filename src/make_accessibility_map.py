@@ -236,16 +236,21 @@ def render(
     A = A_flat.reshape(ny, nx)
     A_masked = np.where(in_poly.reshape(ny, nx), A, np.nan)
 
-    # Allocate population to fine grid (visualization-only — used for the
-    # "share below Sphere" stat and the colormap norm).
-    pop_grid = _allocate_population_to_grid(
-        shelters, float(baseline.pop_total.sum()),
-        XX, YY, cell_size_m, bx0, by0,
-    )
+    # "Where people experience accessibility" = fine cells whose centroid
+    # falls inside a 2022 shelter polygon. Using this tight mask for the
+    # stats and the colormap normalization gives a value much closer to
+    # Ahn et al.'s published Camp 22 mean (≈ 0.077) than the
+    # Gaussian-smoothed mask, which bleeds into latrine-adjacent cells
+    # whose A_i spikes inflate vmax.
+    from make_random_placement_map import _shelter_mask_on_grid
+
+    pop_grid = _shelter_mask_on_grid(
+        shelters, bx0, by0, nx, ny, cell_size_m
+    ).astype(float)
     pop_flat = pop_grid.ravel()
 
     print(f"  E2SFCA range [{np.nanmin(A_masked):.4f}, {np.nanmax(A_masked):.4f}], "
-          f"mean over populated fine cells: "
+          f"mean over shelter-centroid fine cells: "
           f"{float(np.nanmean(A_masked[pop_grid > 0])):.4f}")
 
     # ------------------------------------------------------------------
@@ -353,8 +358,9 @@ def render(
         va="center", fontsize=8, color=PALETTE["ink"],
     )
 
-    # Right column for legend + stats, fully outside the heatmap
-    side_ax = fig.add_axes([0.76, 0.08, 0.22, 0.84])
+    # Right column for legend + stats, fully outside the heatmap.
+    # Push it well past the rotated colorbar label so nothing overlaps.
+    side_ax = fig.add_axes([0.80, 0.08, 0.18, 0.84])
     side_ax.set_xlim(0, 1)
     side_ax.set_ylim(0, 1)
     side_ax.axis("off")
