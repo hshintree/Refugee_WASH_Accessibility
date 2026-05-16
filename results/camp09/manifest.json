@@ -1,0 +1,20 @@
+{
+  "camp": "Camp 09",
+  "K": 20,
+  "lambdas": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0
+  ],
+  "n_demand_cells": 288,
+  "n_existing_latrines_in_camp": 530,
+  "n_candidates": 50,
+  "exclusion_settings": {
+    "min_latrine_setback_m": 25.0,
+    "sensitive_buffer_m": 50.0,
+    "min_pairwise_spacing_m": 50.0
+  },
+  "total_seconds": 1.6984460353851318
+}
